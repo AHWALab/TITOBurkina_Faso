@@ -12,6 +12,7 @@
 !Cuba_config.py
 !orchestrator.py
 !pipeline.sh
+!manage_cron.sh
 !setup_tito.sh
 !setup_ef5_path.sh
 !README.md
