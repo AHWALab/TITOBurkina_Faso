@@ -362,6 +362,29 @@ def main(args):
                     f"High-res EF5 rerun skipped (selected {selected_count} gauge(s), "
                     f"needs at least {highres_min_gauges})."
                 )
+    
+    ###-------------------------- FINAL CLEANUP --------------------------------
+    # Remove any duplicated IMERG files created during this run
+    # This ensures the next run starts with only real IMERG data
+    newline(2)
+    print("***_________Cleaning up duplicated IMERG files_________***")
+    try:
+        imerg_latency_limit = currentTime - timedelta(hours=4)
+        precip_files = [f for f in listdir(precipFolder) if "qpe" in f and f.endswith('.tif')]
+        removed_count = 0
+        for file in precip_files:
+            try:
+                file_path = os.path.join(precipFolder, file)
+                file_timestamp = dt.strptime(file[10:22], '%Y%m%d%H%M').replace(tzinfo=timezone.utc)
+                if file_timestamp > imerg_latency_limit:
+                    remove(file_path)
+                    removed_count += 1
+            except Exception as e:
+                print(f"    Warning: Could not process file {file}: {e}")
+        print(f"    Removed {removed_count} duplicated IMERG file(s) newer than {imerg_latency_limit.strftime('%Y-%m-%d %H:%M')} UTC")
+    except Exception as e:
+        print(f"    Warning: Error during final cleanup: {e}")
+    print("***_________Final cleanup complete_________***")
              
 """
 Run the main() function when invoked as a script

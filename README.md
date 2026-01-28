@@ -108,7 +108,30 @@ Open `Cuba_config.py` and ensure the following settings are correct:
   Logs from the pipeline can be viewed in `data/logs/`.
 
 **3. Schedule TITO to run automatically every hour (optional):**
-  To run TITO automatically at the start of every hour:
+  
+  You can use the `manage_cron.sh` script to easily manage the TITO cron job:
+  
+  - **Install the cron job:**
+    ```sh
+    ./manage_cron.sh install
+    ```
+  
+  - **Check cron job status:**
+    ```sh
+    ./manage_cron.sh status
+    ```
+  
+  - **Remove the cron job:**
+    ```sh
+    ./manage_cron.sh remove
+    ```
+  
+  TITO will run automatically every hour at hh:00 once installed.
+
+  <details>
+  <summary><b>Manual cron setup (alternative method)</b></summary>
+
+  If you prefer to set up the cron job manually:
   
   1. Open the crontab editor:
      ```sh
@@ -126,6 +149,8 @@ Open `Cuba_config.py` and ensure the following settings are correct:
      ```
   
   TITO will now run automatically every hour at hh:00.
+
+  </details>
 
 **Note on running the GFS downloader script:**
 

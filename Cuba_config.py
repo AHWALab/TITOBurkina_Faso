@@ -73,5 +73,5 @@ LR_timestep = "60u"
 QPF_archive_path = "precip/GFS"
 
 # Email associated to GPM account
-email_gpm = 'vrobledodelgado@uiowa.edu'
+email_gpm = 'put the registered email here'
 server = 'https://jsimpsonhttps.pps.eosdis.nasa.gov/imerg/gis/early/'
