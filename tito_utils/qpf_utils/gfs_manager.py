@@ -7,79 +7,54 @@ import glob
 
 def GFS_searcher(path_gfs, qpf_store_path, start_time, end_time, xmin, xmax, ymin, ymax):
     """
-    Check if GFS files exist between start_time and end_time.
-    If all files are found, copy them to qpf_store_path.
-    If not, adjust start_time to the nearest GFS cycle (00,06,12,18) before the given start_time
-    and call download_GFS with the new start_time.
+    Always download fresh GFS data for the requested window via the Herbie-backed
+    download_GFS function, which automatically selects the latest available GFS cycle
+    and falls back to previous cycles if needed.
+
+    Downloaded files are written to qpf_store_path/gfs_data/ for EF5 to read, and
+    a copy is kept in path_gfs (e.g. precip/GFS/) as a persistent archive.
 
     Parameters
     ----------
     path_gfs : str
-        Path where the GFS tif files are stored.
+        Persistent storage folder for GFS tif files (archive copy target).
+        Recommended: "precip/GFS/"
     qpf_store_path : str
-        Destination path to copy the files.
+        EF5 working QPF folder; files are written here as qpf_store_path/gfs_data/.
     start_time : datetime
         Start time of requested data.
     end_time : datetime
         End time of requested data.
     xmin, xmax, ymin, ymax : float
-        Spatial domain for download_GFS.
+        Spatial domain for clipping.
     """
 
-    # Resolve archive path and ensure store path exists
-    path_gfs_resolved = os.path.abspath(path_gfs)
-    if not os.path.isdir(path_gfs_resolved):
-        print(f"Warning: GFS archive path does not exist or is not a directory: {path_gfs_resolved}")
-
-    # Ensure qpf_store_path exists
+    # EF5 working folder — cleared each cycle so stale data never accumulates
     download_folder = os.path.join(qpf_store_path, "gfs_data/")
     os.makedirs(download_folder, exist_ok=True)
+    os.makedirs(path_gfs, exist_ok=True)
 
     for f in glob.glob(os.path.join(download_folder, "*.tif")):
-                os.remove(f)
+        try:
+            os.remove(f)
+        except Exception:
+            pass
 
-    # Build list of expected times (hourly steps assumed)
-    expected_times = []
-    current = start_time
-    
-    while current <= end_time:
-        expected_times.append(current)
-        current += timedelta(hours=1)
+    # Always download fresh — download_GFS picks the latest released GFS cycle
+    # and falls back to previous cycles automatically if a cycle isn't ready yet.
+    print(f"Downloading fresh GFS data from {start_time} to {end_time}...")
+    result = download_GFS(start_time, end_time, xmin, xmax, ymin, ymax, download_folder)
+    num_written = len(result) if result else 0
+    print(f"GFS download completed. Files written: {num_written}")
 
-    # Build expected file names
-    expected_files = [
-        os.path.join(path_gfs_resolved, f"gfs.{t:%Y%m%d%H%M}.tif") for t in expected_times
-    ]
-    
-    missing_files = [f for f in expected_files if not os.path.exists(f)]
-    if not missing_files:
-        print("All files available. Copying to destination...")
-        #copy files
-        for f in expected_files:
-            dest = os.path.join(download_folder, os.path.basename(f))
-            try:
-                shutil.copy2(f, dest)
-            except Exception as e:
-                print(f"Failed to copy {f}: {e}")
-        print("Copy completed.")
-    else:
-        print(f"⚠️ Missing {len(missing_files)} files. Triggering download via downloader fallback...")
+    if num_written == 0:
+        raise RuntimeError("No GFS data available after downloader fallback attempts.")
 
-        # Clean any previous partial downloads for a fresh attempt
-        for f in glob.glob(os.path.join(download_folder, "*.tif")):
-            try:
-                os.remove(f)
-            except Exception:
-                pass
-
-        # Delegate fallback-to-previous-cycle logic to download_GFS
-        print(f"Calling download_GFS with start_time: {start_time}, end_time: {end_time}")
-        print(f"Download folder: {download_folder}")
-        result = download_GFS(start_time, end_time, xmin, xmax, ymin, ymax, download_folder)
-        num_written = len(result) if result else 0
-        print(f"Download completed. Files written: {num_written}")
-
-        if num_written == 0:
-            raise RuntimeError("No GFS data available after downloader fallback attempts.")
-        
+    # Archive a copy to path_gfs so future diagnostic/hindcast runs can reuse them
+    for f in result:
+        dest = os.path.join(path_gfs, os.path.basename(f))
+        try:
+            shutil.copy2(f, dest)
+        except Exception as e:
+            print(f"Warning: could not archive {os.path.basename(f)} to {path_gfs}: {e}")
         

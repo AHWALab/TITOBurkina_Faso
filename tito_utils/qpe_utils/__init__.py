@@ -7,6 +7,9 @@ from .imerg_retrieve import (
     processIMERG,
     get_new_precip
 )
+from .hsaf_retrieve import (
+    get_new_hsaf_precip,
+)
 
 __all__ = [
     'retrieve_imerg_files',
@@ -15,5 +18,6 @@ __all__ = [
     'ReadandWarp',
     'WriteGrid',
     'processIMERG',
-    'get_new_precip'
+    'get_new_precip',
+    'get_new_hsaf_precip',
 ]

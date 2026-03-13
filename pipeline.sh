@@ -57,7 +57,7 @@ set -u
 
 echo "Running TITOV2 orchestrator..."
 cd "$PROJECT_ROOT"
-PYTHONUNBUFFERED=1 python orchestrator.py Cuba_config.py
+PYTHONUNBUFFERED=1 python orchestrator.py westafrica1km_config.py
 echo "Orchestrator complete."
 
 set +u

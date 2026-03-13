@@ -1,17 +1,16 @@
 import os            
+import re
 import shutil        
 from datetime import datetime, timedelta, timezone  
 from tito_utils.file_utils.datetime_utils import get_geotiff_datetime
 
-def _ensure_aware_utc(dt):
-    if dt is None:
-        return None
-    try:
-        if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
-            return dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except Exception:
-        return dt.replace(tzinfo=timezone.utc)
+
+def _get_hsaf_datetime(filename):
+    """Extract datetime from an HSAF filename like h40_YYYYMMDD_HHMM_fdk.tif."""
+    m = re.match(r"h40_(\d{8})_(\d{4})_fdk\.tif$", filename)
+    if m:
+        return datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M")
+    return None
 
 def cleanup_precip(current_datetime, precipFolder, qpf_store_path):
     """Function that cleans up the precip folder for the current EF5 run
@@ -22,16 +21,25 @@ def cleanup_precip(current_datetime, precipFolder, qpf_store_path):
         precipFolder {str} -- path to the geotiff precipitation folder
         qpf_store_path {str} -- path to the folder where QPF files are stored
     """
-    # Normalize current time to timezone-aware UTC
-    current_datetime = _ensure_aware_utc(current_datetime)
+    # Normalize timezone handling: compare naive UTC datetimes to avoid
+    # "can't compare offset-naive and offset-aware datetimes" errors.
+    def _to_naive_utc(dt):
+        try:
+            if getattr(dt, "tzinfo", None) is not None:
+                return dt.astimezone(timezone.utc).replace(tzinfo=None)
+            return dt
+        except Exception:
+            # If anything unexpected, fall back to original value
+            return dt
+
+    current_naive_utc = _to_naive_utc(current_datetime)
+
     qpes = []
     qpfs = []
-    older_QPE = current_datetime - timedelta(hours=9.5)
-    imerg_Latency = current_datetime - timedelta(hours=4)
+    older_QPE = current_naive_utc - timedelta(hours=9.5)
+    imerg_Latency = current_naive_utc - timedelta(hours=4)
     
     try:
-        # Ensure store folder exists
-        os.makedirs(qpf_store_path, exist_ok=True)
         # List all precip files
         precip_files = os.listdir(precipFolder)
 
@@ -45,48 +53,58 @@ def cleanup_precip(current_datetime, precipFolder, qpf_store_path):
         print("    Deleting all QPE files older than Fail Time: ", older_QPE)
         for qpe in qpes:
             try:
-                qpe_path = os.path.join(precipFolder, qpe)
-                geotiff_datetime = _ensure_aware_utc(get_geotiff_datetime(qpe_path))
-                if geotiff_datetime is not None and geotiff_datetime < older_QPE:
-                    os.remove(qpe_path)
+                geotiff_datetime = get_geotiff_datetime(precipFolder + qpe)
+                if geotiff_datetime < older_QPE:
+                    os.remove(precipFolder + qpe)
             except Exception as e:
                 print(f"Error processing QPE file {qpe}: {e}")
 
-        print("    Deleting all QPF files older than Current Time: ", current_datetime)
-        print("    Copying all QPF files older than Current Time: ", current_datetime, " into qpf_store folder.")
+        print("    Deleting all QPF files older than Current Time: ", current_naive_utc)
+        print("    Copying all QPF files older than Current Time: ", current_naive_utc, " into qpf_store folder.")
         for qpf in qpfs:
             try:
-                qpf_path = os.path.join(precipFolder, qpf)
-                geotiff_datetime = _ensure_aware_utc(get_geotiff_datetime(qpf_path))
-                if geotiff_datetime is not None and geotiff_datetime < current_datetime:
-                    shutil.copy2(qpf_path, qpf_store_path)
-                    os.remove(qpf_path)
+                geotiff_datetime = get_geotiff_datetime(precipFolder + qpf)
+                if geotiff_datetime < current_naive_utc:
+                    shutil.copy2(precipFolder + qpf, qpf_store_path)
+                os.remove(precipFolder + qpf)
             except Exception as e:
                 print(f"Error processing QPF file {qpf}: {e}")
 
         print(f"    Deleting all QPE files newer than Imerg Latency Time: {imerg_Latency} because it might be duplicated files")
         for qpedup in qpes:
             try:
-                qpe_path = os.path.join(precipFolder, qpedup)
-                geotiff_datetime = _ensure_aware_utc(get_geotiff_datetime(qpe_path))
-                if geotiff_datetime is not None and geotiff_datetime > imerg_Latency:
-                    os.remove(qpe_path)
+                geotiff_datetime = get_geotiff_datetime(precipFolder + qpedup)
+                if geotiff_datetime > current_naive_utc - timedelta(hours=4):
+                    os.remove(precipFolder + qpedup)
             except Exception as e:
                 print(f"Error processing QPE duplicate file {qpedup}: {e}")
 
         print(f"    Deleting all QPF files in store folder older than: {imerg_Latency}")
         qpf_stored_files = os.listdir(qpf_store_path)
         qpf_stored_files = [f for f in qpf_stored_files if f.endswith('.tif')]
-        max_qpf = current_datetime - timedelta(hours=4)
+        max_qpf = current_naive_utc - timedelta(hours=4)
         for qpf_stored in qpf_stored_files:
             try:
-                stored_path = os.path.join(qpf_store_path, qpf_stored)
-                qpf_datetime = _ensure_aware_utc(get_geotiff_datetime(stored_path))
-                if qpf_datetime is not None and qpf_datetime < max_qpf:
-                    os.remove(stored_path)
+                qpf_datetime = get_geotiff_datetime(qpf_store_path + qpf_stored)
+                if qpf_datetime < max_qpf:
+                    os.remove(qpf_store_path + qpf_stored)
             except Exception as e:
                 print(f"Error processing stored QPF file {qpf_stored}: {e}")
+        # --- HSAF file cleanup (h40_*_fdk.tif in precipFolder and _hsaf_raw/) ---
+        hsaf_raw_dir = os.path.join(precipFolder, "_hsaf_raw")
+        for search_dir in [precipFolder, hsaf_raw_dir]:
+            if not os.path.isdir(search_dir):
+                continue
+            for fname in os.listdir(search_dir):
+                if not fname.startswith("h40_") or not fname.endswith(".tif"):
+                    continue
+                fdt = _get_hsaf_datetime(fname)
+                if fdt is not None and fdt < older_QPE:
+                    try:
+                        os.remove(os.path.join(search_dir, fname))
+                        print(f"    Deleted old HSAF file: {fname}")
+                    except Exception as e:
+                        print(f"Error deleting HSAF file {fname}: {e}")
+
     except Exception as e:
         print(f"General error in cleanup_precip function: {e}")
-
-        

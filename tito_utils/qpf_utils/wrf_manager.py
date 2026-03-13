@@ -56,7 +56,8 @@ def netcdf_to_geotiff(file_nc, qpf_store_folder, var_name):
     da.rio.write_nodata(-9999, inplace=True)
     da = da.rio.set_spatial_dims(x_dim="lon", y_dim="lat")
     # Save as GeoTIFF
-    da.rio.to_raster(f"{qpf_store_folder}/{os.path.basename(file_nc)[:-len('.nc')]}.tif")
+    out_name = f"{os.path.basename(file_nc)[:-len('.nc')]}.tif"
+    da.rio.to_raster(f"{qpf_store_folder}/{out_name}")
     ds.close()
 
 def WRF_searcher(path_wrf, qpf_store_path, start_time, end_time, LR_timestep, var_name, filename_template):
@@ -115,14 +116,24 @@ def WRF_searcher(path_wrf, qpf_store_path, start_time, end_time, LR_timestep, va
         
     missing_files = [f for f in expected_files if not os.path.exists(f)]
     if not missing_files:
-        print("All files available. Converting files to .tif")
-        for f in expected_files:
+        print("All WRF files found. Converting to GeoTIFF...")
+        conversion_ok = True
+        for f, t in zip(expected_files, expected_times):
             try:
                 netcdf_to_geotiff(f, download_folder, var_name)
+                # Rename to EF5-compatible format: wrf.YYYYMMDDHH00.tif
+                orig_tif = os.path.join(download_folder, os.path.basename(f)[:-len('.nc')] + '.tif')
+                std_tif = os.path.join(download_folder, f"wrf.{t:%Y%m%d%H%M}.tif")
+                if os.path.exists(orig_tif) and os.path.abspath(orig_tif) != os.path.abspath(std_tif):
+                    os.rename(orig_tif, std_tif)
             except Exception as e:
-                print(f"Failed to create .tif file {f}: {e}")
-        print("Convertion completed..")
+                print(f"Failed to convert WRF file {f}: {e}")
+                conversion_ok = False
+        if conversion_ok:
+            print("WRF conversion completed.")
+        return conversion_ok
     else:
-        print(f"⚠️ Missing {len(missing_files)} files..")
-        print(f"⚠️ WARNING ⚠️ the system will run without WRF inputs due to lack of data or incompatible format")
-        print(f"⚠️ WARNING ⚠️ Check tito_utils/qpf_utils/wrf_manager.tif")
+        print(f"⚠️ Missing {len(missing_files)} WRF files.")
+        print(f"⚠️ WARNING ⚠️ The system will run without WRF inputs due to missing data.")
+        print(f"⚠️ Check tito_utils/qpf_utils/wrf_manager.py for details.")
+        return False

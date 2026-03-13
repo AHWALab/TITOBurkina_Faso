@@ -7,37 +7,109 @@ import datetime
 from datetime import timedelta
 from multiprocessing.pool import ThreadPool
 import subprocess
-from typing import Optional
 from tito_utils.file_utils.file_handling import is_non_zero_file, mkdir_p
 from tito_utils.ef5.alerts import send_mail
 
-def rename_ef5_precip(precipEF5Folder, precipFolder): 
+
+def _apply_hsaf_control_overrides(lines):
+    """Adjust generated EF5 control lines for HSAF forcing.
+
+    - Comment the full IMERG forcing block.
+    - Insert HSAF forcing block right after IMERG block.
+    - In Task Simulation_QPE and Task Simulation_QPF, switch PRECIP to HSAF and TIMESTEP to 10u.
     """
-    Move the qpe and qpf files into precipEF5folder to be ingested by EF5 using
-    a unify format.
-    """   
-    # Collect .tif files, sort by the embedded timestamp (YYYYMMDDHHMM) so that
-    # the last 4 correspond to the newest 4 timesteps, then skip those.
-    tif_files = [f for f in os.listdir(precipFolder) if f.endswith('.tif')]
+    out = []
+    i = 0
+    inserted_hsaf_block = False
+    in_qpe_task = False
+    in_qpf_task = False
 
-    def _extract_timestamp(name: str) -> str:
-        # Matches the 12-digit timestamp segment like 202306062030 in
-        # imerg.qpf.202306062030.30minAccum.tif
-        m = re.search(r'\.(\d{12})\.', name)
-        return m.group(1) if m else ''  # Empty string sorts before valid timestamps
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
 
-    # Sort oldest -> newest by timestamp string (lexicographic works with zero padding)
-    tif_files.sort(key=_extract_timestamp)
+        # Track whether we are inside Task Simulation_QPE block.
+        if stripped == "[Task Simulation_QPE]":
+            in_qpe_task = True
+            in_qpf_task = False
+        elif stripped == "[Task Simulation_QPF]":
+            in_qpf_task = True
+            in_qpe_task = False
+        elif stripped.startswith("[") and stripped != "[Task Simulation_QPE]":
+            in_qpe_task = False
+            in_qpf_task = False
 
-    files_to_copy = tif_files[:-4] if len(tif_files) > 4 else tif_files
+        # Comment IMERG forcing block and add HSAF block below it.
+        if stripped == "[PrecipForcing IMERG]":
+            while i < len(lines):
+                block_line = lines[i]
+                block_stripped = block_line.strip()
+                if i > 0 and block_stripped.startswith("[") and block_stripped != "[PrecipForcing IMERG]":
+                    break
+                if block_line.lstrip().startswith("#"):
+                    out.append(block_line)
+                else:
+                    out.append("#" + block_line)
+                i += 1
 
-    for filename in files_to_copy:
-        source_file = os.path.join(precipFolder, filename)
-        dest_file = os.path.join(precipEF5Folder, filename)
+            if not inserted_hsaf_block:
+                out.extend([
+                    "[PrecipForcing HSAF]\n",
+                    "TYPE=TIF\n",
+                    "UNIT=mm/h\n",
+                    "FREQ=10u\n",
+                    "LOC=precipEF5/\n",
+                    "NAME=h40_YYYYMMDD_HHUU_fdk.tif\n",
+                    "\n",
+                ])
+                inserted_hsaf_block = True
+            continue
+
+        if (in_qpe_task or in_qpf_task) and stripped.startswith("PRECIP="):
+            out.append("PRECIP=HSAF\n")
+            i += 1
+            continue
+
+        if (in_qpe_task or in_qpf_task) and stripped.startswith("TIMESTEP="):
+            out.append("TIMESTEP=10u\n")
+            i += 1
+            continue
+
+        out.append(line)
+        i += 1
+
+    return out
+
+def rename_ef5_precip(precipEF5Folder, precipFolder, qpe_source="IMERG"): 
+    """
+    Copy precipitation TIFs into precipEF5Folder to be ingested by EF5.
+    Clears precipEF5Folder first so files from a previous run (different QPE
+    source or different cycle) never mix with the current run's files.
+    For IMERG: scans precipFolder only.
+    For HSAF: also scans precipFolder/_hsaf_raw/ since that is where converted TIFs live.
+    """
+    # Clear the folder before populating it so no stale files remain.
+    for stale in glob.glob(os.path.join(precipEF5Folder, "*.tif")):
         try:
-            shutil.copy(source_file, dest_file)
-        except PermissionError as e:
-            print(f"PermissionError: {e}")
+            os.remove(stale)
+        except Exception as e:
+            print(f"Warning: could not remove stale precipEF5 file {stale}: {e}")
+
+    search_dirs = [precipFolder]
+    if str(qpe_source).upper() == "HSAF":
+        hsaf_raw = os.path.join(precipFolder, "_hsaf_raw")
+        if os.path.isdir(hsaf_raw):
+            search_dirs.append(hsaf_raw)
+
+    for search_dir in search_dirs:
+        for filename in os.listdir(search_dir):
+            if filename.endswith('.tif'):
+                source_file = os.path.join(search_dir, filename)
+                dest_file = os.path.join(precipEF5Folder, filename)
+                try:
+                    shutil.copy(source_file, dest_file)
+                except PermissionError as e:
+                    print(f"PermissionError: {e}")
     for filename2 in os.listdir(precipEF5Folder):
         if 'qpf' in filename2 and filename2.endswith('.tif'):
             new_filename = filename2.replace('qpf', 'qpe')
@@ -70,12 +142,6 @@ def find_available_states(statesPath, modelStates, systemStartTime, failTime):
                 foundAllStates = False
         if not foundAllStates:
             realSystemStartTime -= timedelta(minutes=30)
-        else:
-            # All states found for this time - log the successful find
-            print(f"    Found all states for time: {realSystemStartTime.strftime('%Y%m%d_%H%M')}")
-            for state in modelStates:
-                state_path = f"{statesPath}{state}_{realSystemStartTime.strftime('%Y%m%d_%H%M')}.tif"
-                print(f"    Using start state: {state_path}")
 
     return foundAllStates, realSystemStartTime
 
@@ -135,115 +201,24 @@ def send_state_alerts(foundAllStates,realSystemStartTime,systemStartTime,current
             subject=subject,
             text=message
         )
-def _generate_gauge_block(gauge_ids, gauge_lookup, gauge_name_prefix):
-    """Generate the gauge-basin block text for high-res control files."""
-    lines = ["#---Start Gauge-Basin Block", ""]
-    
-    reindexed_lines = []
-    missing = []
-    for new_idx, gauge_id in enumerate(gauge_ids):
-        raw_line = gauge_lookup.get(gauge_id)
-        if raw_line is None:
-            missing.append(gauge_id)
-            continue
-        # Reindex the gauge line
-        reindexed = re.sub(r"\[Gauge\s+\d+\]", f"[Gauge {new_idx}]", raw_line, count=1)
-        reindexed_lines.append(reindexed)
-    
-    if missing:
-        print(f"    Warning: skipped {len(missing)} gauge(s) absent from the gauge list: {missing}")
-    
-    if reindexed_lines:
-        lines.extend(reindexed_lines)
-        lines.append("")
-        lines.append("[Basin 0]")
-        gauge_names = " ".join(f"gauge={gauge_name_prefix}_{gid}" for gid in gauge_ids)
-        if gauge_names:
-            lines.append(f"# {gauge_names}")
-        gauge_indices = " ".join(f"gauge={idx}" for idx in range(len(reindexed_lines)))
-        lines.append(gauge_indices)
-        lines.append("")
-    
-    lines.append("#---End Gauge-Basin Block")
-    lines.append("")
-    return "\n".join(lines)
 
-def write_control_file(tmpOutput, dataPath, subdomain, systemModel,templatePath, template, statesPath, realSystemStartTime, systemStartLRTime, systemWarmEndTime, systemStateEndTime, systemEndTime, LR_TimeStep, LR_run, statesFound, highres_selection=None, consolidated_csv_path=None):
+def write_control_file(tmpOutput, dataPath, subdomain, systemModel,templatePath, template, statesPath, realSystemStartTime, systemStartLRTime, systemWarmEndTime, systemStateEndTime, systemEndTime, LR_TimeStep, LR_run, statesFound, qpe_source="IMERG", qpf_source="GFS"):
     # Clean up "Hot" folders
     # Delete the previously existing "Hot" folders, ignore error if it doesn't exist
-    # COMMENTED OUT FOR DEBUGGING - to examine generated control file
     rmtree(tmpOutput, ignore_errors=1)
-    # rmtree(dataPath, ignore_errors=1) # Do not delete the parent data path
+    rmtree(dataPath, ignore_errors=1)
     # Create the "Hot" folder for the current run
     mkdir_p(tmpOutput)
     mkdir_p(dataPath)  
     # Create the control files for both subdomains
     # Define the control file path to create
-    controlFile = os.path.join(tmpOutput, "CU_" + subdomain + "_" + systemModel + ".txt")
+    controlFile = tmpOutput + "WA_" + subdomain + "_" + systemModel + ".txt"
     fOut = open(controlFile, "w")
 
-    # Read template content
-    template_content = open(templatePath + template).read()
-    
-    # Update DA_FILE path if consolidated CSV was created, or comment out DA sections if DA is disabled
-    if consolidated_csv_path:
-        print(f"    Updating DA_FILE path to: {consolidated_csv_path}")
-        # Replace DA_FILE=... with the new path
-        template_content = re.sub(
-            r"DA_FILE=[^\n]+",
-            f"DA_FILE={consolidated_csv_path}",
-            template_content
-        )
-    else:
-        # DA is disabled - comment out DA_FILE lines and all EMB gauges
-        print("    DA is disabled - commenting out DA_FILE lines and EMB gauge configurations")
-        
-        # Comment out DA_FILE lines
-        template_content = re.sub(
-            r"^(DA_FILE=)",
-            r"#\1",
-            template_content,
-            flags=re.MULTILINE
-        )
-        
-        # Comment out all gauge lines starting with [gauge EMB
-        template_content = re.sub(
-            r"^(\[gauge EMB)",
-            r"#\1",
-            template_content,
-            flags=re.MULTILINE
-        )
-        
-        # Comment out all gauge reference lines (gauge=EMB...)
-        template_content = re.sub(
-            r"^(gauge=EMB)",
-            r"#\1",
-            template_content,
-            flags=re.MULTILINE
-        )
-    
-    # Handle high-res gauge block replacement if provided
-    if highres_selection and highres_selection.gauge_ids:
-        gauge_block = _generate_gauge_block(
-            highres_selection.gauge_ids,
-            highres_selection.gauge_lookup,
-            highres_selection.gauge_name_prefix
-        )
-        # Replace the gauge block in the template
-        gauge_block_pattern = re.compile(
-            r"#---Start Gauge-Basin Block.*?#---End Gauge-Basin Block", re.DOTALL
-        )
-        if "#---Start Gauge-Basin Block" in template_content:
-            template_content = gauge_block_pattern.sub(gauge_block, template_content, count=1)
-            print(f"    Control file updated with {len(highres_selection.gauge_ids)} high-res gauge(s).")
-        else:
-            print("    Warning: Gauge-Basin marker not found in template; skipping gauge block update.")
-    
-    # Process template line by line for other replacements
-    # Ensure tmpOutput ends with a separator for the control file
-    tmpOutput_with_sep = os.path.join(tmpOutput, '')
-    for line in template_content.splitlines(keepends=True):
-        line = re.sub('{OUTPUTPATH}', tmpOutput_with_sep, line)
+    # Create a control file with updated fields
+    rendered_lines = []
+    for line in open(templatePath + template).readlines():
+        line = re.sub('{OUTPUTPATH}', tmpOutput, line)
         line = re.sub('{STATESPATH}', statesPath, line)
         line = re.sub('{TIMEBEGIN}', realSystemStartTime.strftime('%Y%m%d%H%M'), line)
         line = re.sub('{TIMEWARMEND}', systemWarmEndTime.strftime('%Y%m%d%H%M'), line)
@@ -261,11 +236,22 @@ def write_control_file(tmpOutput, dataPath, subdomain, systemModel,templatePath,
                 line = "task=Simulation_QPF\n"    # uncomment QPF
             else:
                 line = "#task=Simulation_QPF\n"   # comment QPF
-        
+
+        # Switch PRECIPFORECAST to the active QPF source (GFS or WRF)
+        if LR_run and "PRECIPFORECAST=" in line and not line.lstrip().startswith('#'):
+            line = re.sub(r'PRECIPFORECAST=\w+', f'PRECIPFORECAST={qpf_source.upper()}', line)
+
         # If valid states are found, do not specify warm-up in control file
         if statesFound and "TIME_WARMEND=" in line:
             if not line.lstrip().startswith('#'):
                 line = "#" + line
+
+        rendered_lines.append(line)
+
+    if str(qpe_source).upper() == "HSAF":
+        rendered_lines = _apply_hsaf_control_overrides(rendered_lines)
+
+    for line in rendered_lines:
         fOut.write(line)
         
     fOut.close()
@@ -280,30 +266,17 @@ def run_EF5(ef5Path, hot_folder_path, control_file, log_file):
         control_file {str} -- path to the control file fir the simulation
         log_file {str} -- path to the log file for this run
     """
-    # Avoid shell=True to prevent /bin/sh issues. Handle output redirection in Python.
-    log_path = os.path.join(hot_folder_path, log_file)
-    with open(log_path, 'w') as log:
-        subprocess.call([ef5Path, control_file], stdout=log, stderr=subprocess.STDOUT)
+    subprocess.call(ef5Path + " " + control_file + " > " + hot_folder_path + log_file, shell=True)
 
 
-def _compose_output_path(base_path: str, timestamp_str: str, extension: str, resolution_tag: Optional[str]) -> str:
-    """Build a standardized filename that optionally includes a resolution tag."""
-    safe_tag = ""
-    if resolution_tag:
-        safe_tag = re.sub(r"[^0-9A-Za-z_-]", "", resolution_tag.strip())
-    if safe_tag:
-        return f"{base_path}.{safe_tag}.{timestamp_str}{extension}"
-    return f"{base_path}.{timestamp_str}{extension}"
-
-
-def _rename_outputs_with_timestamp(hot_folder_path: str, timestamp_str: str, resolution_tag: Optional[str] = None) -> None:
+def _rename_outputs_with_timestamp(hot_folder_path: str, timestamp_str: str) -> None:
     """Rename EF5 outputs in the hot folder to use a unified timestamp.
 
     - maxq.*, maxunitq.*, qpeaccum.*, qpfaccum.* -> base.{timestamp}.tif
     - ts.*.csv -> ts.*.{timestamp}.csv
     Log file naming is handled via the EF5 invocation (redirect target).
     """
-    bases = ["maxq", "maxunitq", "qpeaccum", "qpfaccum", "maxsm", "maxdepth"]
+    bases = ["maxq", "maxunitq", "qpeaccum", "qpfaccum", "maxsm"]
     for base in bases:
         pattern = os.path.join(hot_folder_path, f"{base}.*.tif")
         matches = sorted(glob.glob(pattern))
@@ -311,9 +284,7 @@ def _rename_outputs_with_timestamp(hot_folder_path: str, timestamp_str: str, res
             continue
         # Prefer the newest file in case multiple exist
         latest = max(matches, key=lambda p: os.path.getmtime(p))
-        new_name = _compose_output_path(
-            os.path.join(hot_folder_path, base), timestamp_str, ".tif", resolution_tag
-        )
+        new_name = os.path.join(hot_folder_path, f"{base}.{timestamp_str}.tif")
         try:
             if os.path.abspath(latest) != os.path.abspath(new_name):
                 if os.path.exists(new_name):
@@ -325,7 +296,7 @@ def _rename_outputs_with_timestamp(hot_folder_path: str, timestamp_str: str, res
     # Timeseries CSVs
     for csv_path in glob.glob(os.path.join(hot_folder_path, "ts.*.csv")):
         root, ext = os.path.splitext(csv_path)
-        new_name = _compose_output_path(root, timestamp_str, ext, resolution_tag)
+        new_name = f"{root}.{timestamp_str}{ext}"
         try:
             if os.path.abspath(csv_path) != os.path.abspath(new_name):
                 if os.path.exists(new_name):
@@ -335,7 +306,7 @@ def _rename_outputs_with_timestamp(hot_folder_path: str, timestamp_str: str, res
             print(f"Warning: could not rename {csv_path} -> {new_name}: {e}")
 
 
-def run_ef5_simulation(ef5Path, tmpOutput, controlFile, output_timestamp_str, resolution_tag: Optional[str] = None):
+def run_ef5_simulation(ef5Path, tmpOutput, controlFile, output_timestamp_str):
     # Use timestamped log name
     log_name = f"ef5.{output_timestamp_str}.log"
     args = [ef5Path, tmpOutput, controlFile, log_name]
@@ -345,7 +316,7 @@ def run_ef5_simulation(ef5Path, tmpOutput, controlFile, output_timestamp_str, re
     tp.join()
 
     # Rename generated outputs to use the requested timestamp
-    _rename_outputs_with_timestamp(tmpOutput, output_timestamp_str, resolution_tag)
+    _rename_outputs_with_timestamp(tmpOutput, output_timestamp_str)
 
     # cleaning EF5 precipitation for next cycle
     for f in glob.glob("precipEF5/*"):
@@ -356,10 +327,10 @@ def prepare_ef5(precipEF5Folder, precipFolder, statesPath, modelStates,
     systemStartTime, failTime, currentTime, systemName, SEND_ALERTS, 
     alert_recipients, smtp_config, tmpOutput, dataPath, 
     subdomain, systemModel, templatePath, template, systemStartLRTime, 
-    systemWarmEndTime, systemStateEndTime, systemEndTime, LR_TimeStep, LR_run, highres_selection=None, consolidated_csv_path=None):
+    systemWarmEndTime, systemStateEndTime, systemEndTime, LR_TimeStep, LR_run, qpe_source="IMERG", qpf_source="GFS"):
 
     #copying precip files into folder 
-    rename_ef5_precip(precipEF5Folder, precipFolder) 
+    rename_ef5_precip(precipEF5Folder, precipFolder, qpe_source) 
 
     # Check to see if all the states for the current time step are available: ["crest_SM", "kwr_IR", "kwr_pCQ", "kwr_pOQ"]
     # If not then search for previous ones
@@ -374,12 +345,9 @@ def prepare_ef5(precipEF5Folder, precipFolder, statesPath, modelStates,
     print(" ")
     print("    Writting control file.")
 
-    # Create a timestamped output folder for this run
-    run_output_path = os.path.join(tmpOutput, currentTime.strftime('%Y%m%d%H%M'))
-
-    controlFile = write_control_file(run_output_path, dataPath, subdomain, systemModel, 
+    controlFile = write_control_file(tmpOutput, dataPath, subdomain, systemModel, 
     templatePath, template, statesPath, realSystemStartTime, systemStartLRTime, 
-    systemWarmEndTime, systemStateEndTime, systemEndTime, LR_TimeStep, LR_run, foundAllStates, highres_selection, consolidated_csv_path)
+    systemWarmEndTime, systemStateEndTime, systemEndTime, LR_TimeStep, LR_run, foundAllStates, qpe_source, qpf_source)
 
     """
     # If data assimilation if being used for CREST, clean up previous data assimilation logs
@@ -390,4 +358,4 @@ def prepare_ef5(precipEF5Folder, precipFolder, statesPath, modelStates,
             if is_non_zero_file(assimilationPath + log) == True:
                 remove(assimilationPath + log)
     """
-    return realSystemStartTime, controlFile, run_output_path
+    return realSystemStartTime, controlFile

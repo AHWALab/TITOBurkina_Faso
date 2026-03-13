@@ -1,126 +1,43 @@
-###############################################
-# Global policy: ignore everything by default #
-###############################################
-/*
-
-# Keep the ignore file itself
-!.gitignore
-
-###############################################
-# Allow only these top-level files            #
-###############################################
-!Cuba_config.py
-!orchestrator.py
-!pipeline.sh
-!manage_cron.sh
-!setup_tito.sh
-!setup_ef5_path.sh
-!README.md
-!tito_env.yml
-
-###############################################
-# Allow only these top-level directories      #
-###############################################
-!basic/
-!basic/**
-
-!Nowcast/
-!Nowcast/**
-
-!outputs/
-!outputs/**
-!outputs_25m/
-!outputs_25m/**
-
-
-!parameters/
-!parameters/**
-
-!pet/
-!pet/**
-
-!precip/
-!precip/**
-!precipEF5/
-!precipEF5/**
-
-
-!qpf_store/
-!qpf_store/**
-
-!states/
-!states/**
-!statesHighRes/
-!statesHighRes/**
-
-!templates/
-!templates/**
-
-!tito_utils/
-!tito_utils/**
-
-!DA_Climatology/
-!DA_Climatology/.gitignore
-!DA_Consolidated/
-!DA_Consolidated/.gitignore
-!DA_Manual/
-!DA_Manual/.gitignore
-!DA_Simulation/
-!DA_Simulation/.gitignore
-
-!data/
-!data/logs/
-!data/logs/.gitignore
-
-###############################################
-# Block heavy raster outputs                   #
-###############################################
-basic/**/*.tif
-precip/**/*.tif
-qpf_store/**/*.tif
-states/**/*.tif
-statesHighRes/**/*.tif
-
-###############################################
-# Always ignore transient/cached files        #
-###############################################
-# Python bytecode and caches (even inside allowed dirs)
-**/__pycache__/
-**/*.py[cod]
-*.so
-*.egg
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
 *.egg-info/
-.eggs/
+dist/
+build/
 
-# Virtual environments
-.env
-.venv/
-venv/
-.env*/
+# Jupyter
+.ipynb_checkpoints/
 
-# Jupyter notebook checkpoints
-**/.ipynb_checkpoints/
-
-# Editor/OS clutter
-.vscode/
-*.swp
-*.log
+# OS
 .DS_Store
 Thumbs.db
 
-# Build artifacts
-build/
-dist/
+# Large binary ML/model files
+*.h5
+*.hdf5
+*.pth
+*.npy
+*.nc
+*.nc4
+*.grb
+*.grib
+*.grib2
 
-# Archives
-*.zip
-*.tar
-*.tar.gz
-*.gz
+# Temporary files
+*.tmp
+*.log
+temp/
 
-# Notes:
-# - The policy above ensures ONLY the whitelisted folders/files are tracked.
-# - To apply this strictly if items are already tracked, run:
-#     git rm -r --cached .
-#     git add .
-#     git commit -m "Restrict repo to whitelisted paths; ignore all else"
+# Operational runtime data (not tracked in repo)
+precip/_hsaf_raw/
+precip/GFS/
+precipEF5/*
+!precipEF5/.gitkeep
+outputs/tmp_output_*/
+states/*
+!states/.gitkeep
+qpf_store/gfs_data/
+qpf_store/wrf_data/

@@ -35,6 +35,7 @@ dependencies:
   - executing=2.1.0
   - expat=2.6.3
   - ffmpeg=7.1.0
+  - gzip
   - font-ttf-dejavu-sans-mono=2.37
   - font-ttf-inconsolata=3.000
   - font-ttf-source-code-pro=2.038
@@ -48,6 +49,8 @@ dependencies:
   - freexl=2.0.0
   - fribidi=1.0.10
   - gdal=3.9.3
+  - libgdal-hdf5
+  - libgdal-netcdf
   - geos=3.13.0
   - geotiff=1.7.3
   - giflib=5.2.2
