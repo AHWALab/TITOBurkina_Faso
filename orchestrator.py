@@ -51,7 +51,7 @@ def main(args):
     NOWCAST = True 
     
     # Read the configuration file User should change this line if the configuration file has a different name
-    import westafrica1km_config as config_file
+    import burkinaFaso_90m_config as config_file
     print(">>> Config file loaded")
 
     #Configuration file

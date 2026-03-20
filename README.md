@@ -1,5 +1,3 @@
-# To be edited for Burkina Faso !!!!!!
-
 # Threading Inputs to Outputs (TITO):
 
 TITO is a framework designed to run the EF5 hydrologic model operationally, integrating satellite data, machine learning techniques and NWP products to support real-time forecasting and hydrologic analysis.
@@ -36,14 +34,14 @@ After installation, ensure that your TITO folder contains the following subdirec
 
 ## Repository structure
 
-This repository is desiged to run EF5 operational over West Africa.
+This repository is designed to run EF5 operationally over Burkina Faso.
 Users must populate the required folders with topographic and parameter grids for their region of interest, and modify the EF5 control file (`templates/ef5_control_template.txt`) accordingly. A guide step-by-step to create the needed layers can be found in: [EF5-builder-toolkit](https://github.com/AHWALab/EF5-builder-toolkit).
 
 ### Key Files & Folders
 
-- **`westafrica1km_config.py`** – Configuration file to set up your operational run.
+- **`burkinaFaso_90m_config.py`** – Configuration file to set up your operational run.
 - **`orchestrator.py`** – Main Python script that manages the entire workflow.
-- **`pipeline.sh`** – Bash script that activates the `tito_env` Conda environment and executes `orchestrator.py` using settings from `westafrica1km_config.py`.
+- **`pipeline.sh`** – Bash script that activates the `tito_env` Conda environment and executes `orchestrator.py` using settings from `burkinaFaso_90m_config.py`.
 
 ### Input / Output Directories
 
@@ -62,7 +60,7 @@ Users must populate the required folders with topographic and parameter grids fo
 ## How to run?
 
 **1. Edit the config file:**
-After completing the installation of the required environment and populating the corresponding EF5 folders, open `westafrica_1km_config.py` file. There are few lines users need to change in this config file to run TITO successfully:
+After completing the installation of the required environment and populating the corresponding EF5 folders, open `burkinaFaso_90m_config.py` file. There are few lines users need to change in this config file to run TITO successfully:
 
 - **ef5Path:** Update this path to the corresponding ef5's binary path in your system.
 - **HindCastMode:** If you are running an event happened in the PAST, set `HindCastMode = True` and write the date of interest in `HindCastDate`, use the format "YYYY-MM-DD HH:MM". If you want to run it in Nowcast Mode (meaning TITO will start running in the present time) set `HindCastMode = False`
@@ -82,7 +80,7 @@ After completing the installation of the required environment and populating the
 
 **What if I want to use TITO in other regions?**
 
-If you plan to run TITO outside the default West Africa domain, there are a few important considerations. The machine learning routines were designed and trained using IMERG V07 data (0.1° resolution) over the West Africa region (xmin = −21.4, xmax = 30.4; ymin = −2.9, ymax = 33.1), corresponding to a grid size of **518 × 360 pixels**.
+If you plan to run TITO outside the default Burkina Faso domain, there are a few important considerations. The machine learning routines were designed and trained using IMERG V07 data (0.1° resolution) over the West Africa region (xmin = −21.4, xmax = 30.4; ymin = −2.9, ymax = 33.1), corresponding to a grid size of **518 × 360 pixels**.
 
 If you intend to apply TITO to a different region, we recommend selecting an area with the same spatial dimensions (518 × 360 pixels) to ensure compatibility with the input structure.
 
@@ -95,7 +93,7 @@ Run the following line in your terminal:
 
 ## Contact
 
-Please contact Vanessa Robledo at vanessa-robledodelgado@uiowa.edu or the [AHWA Laboratory](https://ahwa.lab.uiowa.edu/) Development team at engr-ahwa-lab@uiowa.edu.
+Please contact Naman Mehta at naman-mehta@uiowa.edu or Vanessa Robledo at vanessa-robledodelgado@uiowa.edu or the [AHWA Laboratory](https://ahwa.lab.uiowa.edu/) Development team at engr-ahwa-lab@uiowa.edu.
 
 ## Cite this package
 
