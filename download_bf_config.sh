@@ -1,8 +1,8 @@
 #!/bin/bash
 # Downloads and extracts Burkina Faso EF5 model configuration files.
-# basic.zip      → basic/
-# crestParems.zip → parameters/
-# kwParam.zip    → parameters/
+# basic.zip     → basic/
+# crestParem.zip → parameters/
+# kwParam.zip   → parameters/
 # Existing files are always replaced.
 
 set -e
@@ -24,12 +24,12 @@ echo "  Extracting to basic/..."
 mkdir -p basic
 unzip -o "$TMP_DIR/basic.zip" -d basic/
 
-# ── crestParems.zip → parameters/ ────────────────────────────────────────────
-echo "  Downloading crestParems.zip..."
-curl -fL "$BASE_URL/crestParems.zip" -o "$TMP_DIR/crestParems.zip"
+# ── crestParem.zip → parameters/ ────────────────────────────────────────────
+echo "  Downloading crestParem.zip..."
+curl -fL "$BASE_URL/crestParem.zip" -o "$TMP_DIR/crestParem.zip"
 echo "  Extracting to parameters/..."
 mkdir -p parameters
-unzip -o "$TMP_DIR/crestParems.zip" -d parameters/
+unzip -o "$TMP_DIR/crestParem.zip" -d parameters/
 
 # ── kwParam.zip → parameters/ ─────────────────────────────────────────────────
 echo "  Downloading kwParam.zip..."
