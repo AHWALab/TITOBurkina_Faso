@@ -7,7 +7,7 @@ TITO is a framework designed to run the EF5 hydrologic model operationally, inte
 **1. Clone the repository**
 
 ```sh
-git clone https://github.com/AHWALab/TITO.git
+git clone https://github.com/AHWALab/TITOBurkina_Faso.git
 ```
 
 **2. Navigate to the repository folder**
